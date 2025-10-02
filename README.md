@@ -343,3 +343,390 @@ LUX_MINT_ADDRESS=your_lux_mint_address_here
 - **Security Alerts**: Monitor for unauthorized access attempts
 
 This program provides a secure, transparent, and efficient way to distribute LUX tokens to top performers while maintaining strict caps and preventing abuse through Merkle tree verification.
+
+## Deployment & Upgradeability
+
+### Upgrade Authority Management
+
+The program's upgrade authority is controlled by the **GOV multisig** with timelock enforcement through **Squads Protocol**.
+
+#### Initial Deployment
+
+1. **Deploy the program:**
+   ```bash
+   anchor build
+   anchor deploy --provider.cluster devnet
+   ```
+
+2. **Set upgrade authority to GOV multisig:**
+   ```bash
+   # Get the deployed program ID
+   PROGRAM_ID="62syzcwvnS56yKHakNx2rr4JBd5BJmgJ7jDMK3SiipbM"
+   
+   # Set upgrade authority to GOV multisig
+   solana program set-upgrade-authority $PROGRAM_ID --new-upgrade-authority <GOV_MULTISIG_ADDRESS>
+   ```
+
+3. **Verify upgrade authority:**
+   ```bash
+   solana program show $PROGRAM_ID
+   ```
+
+#### Timelock Enforcement
+
+The timelock is enforced through **Squads Protocol**:
+
+1. **Propose upgrade** (requires GOV multisig approval)
+2. **Timelock period** (configurable, typically 24-48 hours)
+3. **Execute upgrade** (after timelock expires)
+
+**Squads Instruction Flow:**
+```bash
+# 1. Create upgrade proposal
+squads create-proposal --multisig <GOV_MULTISIG> --title "Upgrade Hero-Reward Program"
+
+# 2. Add upgrade instruction
+squads add-instruction --proposal <PROPOSAL_ID> \
+  --program-id $PROGRAM_ID \
+  --accounts <UPGRADE_ACCOUNTS> \
+  --data <UPGRADE_DATA>
+
+# 3. Approve proposal (requires threshold signatures)
+squads approve-proposal --proposal <PROPOSAL_ID>
+
+# 4. Execute after timelock (automatic)
+squads execute-proposal --proposal <PROPOSAL_ID>
+```
+
+#### Post-Audit Lock Plan
+
+After successful audit and acceptance, the upgrade authority will be **permanently locked**:
+
+```bash
+# Lock upgrade authority (irreversible)
+solana program set-upgrade-authority $PROGRAM_ID --new-upgrade-authority 11111111111111111111111111111111
+```
+
+**⚠️ WARNING**: This action is **irreversible**. The program will become immutable after this step.
+
+### CI/CD Integration
+
+#### Upgrade Authority Assertion Script
+
+Create `scripts/assert-upgrade-authority.sh`:
+
+```bash
+#!/bin/bash
+set -e
+
+PROGRAM_ID="62syzcwvnS56yKHakNx2rr4JBd5BJmgJ7jDMK3SiipbM"
+EXPECTED_AUTHORITY="<GOV_MULTISIG_ADDRESS>"
+
+echo "🔍 Checking upgrade authority for Hero-Reward Program"
+echo "Program ID: $PROGRAM_ID"
+echo "Expected Authority: $EXPECTED_AUTHORITY"
+
+# Get current upgrade authority
+CURRENT_AUTHORITY=$(solana program show $PROGRAM_ID --output json | jq -r '.upgradeAuthority // "null"')
+
+if [ "$CURRENT_AUTHORITY" = "null" ]; then
+    echo "❌ Failed to fetch program information or program not found"
+    exit 1
+fi
+
+echo "Current Authority: $CURRENT_AUTHORITY"
+
+# Check if upgrade authority matches
+if [ "$CURRENT_AUTHORITY" = "$EXPECTED_AUTHORITY" ]; then
+    echo "✅ Upgrade authority is correctly set to GOV multisig"
+    exit 0
+else
+    echo "❌ Upgrade authority mismatch!"
+    echo "Expected: $EXPECTED_AUTHORITY"
+    echo "Current:  $CURRENT_AUTHORITY"
+    echo ""
+    echo "To fix this, run:"
+    echo "solana program set-upgrade-authority $PROGRAM_ID --new-upgrade-authority $EXPECTED_AUTHORITY"
+    exit 1
+fi
+```
+
+#### GitHub Actions Integration
+
+Add to `.github/workflows/ci.yml`:
+
+```yaml
+name: CI/CD
+on: [push, pull_request]
+
+jobs:
+  assert-upgrade-authority:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Solana CLI
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.solana.com/v1.17.0/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+      - name: Assert Upgrade Authority
+        run: |
+          chmod +x scripts/assert-upgrade-authority.sh
+          ./scripts/assert-upgrade-authority.sh
+        env:
+          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+          SOLANA_KEYPAIR: ${{ secrets.SOLANA_KEYPAIR }}
+```
+
+### Deployment Checklist
+
+- [ ] Program deployed to target cluster
+- [ ] Upgrade authority set to GOV multisig
+- [ ] Upgrade authority verified
+- [ ] Squads timelock configured
+- [ ] CI/CD pipeline configured
+- [ ] Post-audit lock plan documented
+- [ ] Emergency procedures documented
+
+### Emergency Procedures
+
+In case of critical bugs requiring immediate upgrade:
+
+1. **Emergency multisig proposal** (bypasses normal timelock)
+2. **Immediate upgrade execution** (requires emergency threshold)
+3. **Post-upgrade verification** (ensure fix is effective)
+4. **Documentation update** (record emergency upgrade)
+
+## Integration Notes
+
+### For Indexers and UIs
+
+#### Event Monitoring
+
+Monitor these events for real-time hero rewards tracking:
+
+```typescript
+// Subscribe to hero rewards events
+program.addEventListener("Initialized", (event) => {
+  console.log("Program initialized:", event);
+  // Update program state, total units, publisher
+});
+
+program.addEventListener("Prefunded", (event) => {
+  console.log("Vault prefunded:", event);
+  // Update vault balance display
+});
+
+program.addEventListener("WinnersRootPosted", (event) => {
+  console.log("Winners root posted:", event);
+  // Update round state, enable claiming
+});
+
+program.addEventListener("WinnerPaid", (event) => {
+  console.log("Winner paid:", event);
+  // Update claim status, user balances
+});
+
+program.addEventListener("RoundClosed", (event) => {
+  console.log("Round closed:", event);
+  // Update round status, final statistics
+});
+
+program.addEventListener("PublisherUpdated", (event) => {
+  console.log("Publisher updated:", event);
+  // Update publisher address
+});
+
+program.addEventListener("Paused", (event) => {
+  console.log("Program paused:", event);
+  // Show pause notification
+});
+```
+
+#### Key Addresses
+
+| Component | Address | Description |
+|-----------|---------|-------------|
+| **Program ID** | `62syzcwvnS56yKHakNx2rr4JBd5BJmgJ7jDMK3SiipbM` | Hero rewards program |
+| **Governance** | GOV Multisig | Program authority (timelock controlled) |
+| **Publisher** | Configurable | Address authorized to post winners roots |
+| **REW Multisig** | Configurable | Funding source for vault |
+| **State PDA** | `[b"hero_rewards_state"]` | Program state account |
+| **Vault Authority** | `[b"vault_authority"]` | PDA controlling vault |
+| **Round State PDA** | `[b"round_state", round.to_le_bytes()]` | Per-round state |
+| **Claim State PDA** | `[b"claim_state", round.to_le_bytes(), index.to_le_bytes()]` | Per-claim state |
+
+#### Required Safety Checks
+
+```typescript
+// Verify program ID
+const HERO_PROGRAM_ID = "62syzcwvnS56yKHakNx2rr4JBd5BJmgJ7jDMK3SiipbM";
+if (program.programId.toString() !== HERO_PROGRAM_ID) {
+  throw new Error("Invalid hero rewards program ID");
+}
+
+// Verify round bounds
+if (round < 1 || round > state.totalRounds) {
+  throw new Error("Invalid round number");
+}
+
+// Verify round timing
+const now = Math.floor(Date.now() / 1000);
+const roundStart = state.tgeTs + (round - 1) * state.roundLenSecs;
+const roundEnd = roundStart + state.roundLenSecs;
+
+if (now < roundStart) {
+  throw new Error("Round not yet started");
+}
+
+// Verify round cap
+if (roundState.total > state.perRoundCap) {
+  throw new Error("Round total exceeds cap");
+}
+
+// Verify publisher authority
+if (publisher.toString() !== state.publisher.toString()) {
+  throw new Error("Unauthorized publisher");
+}
+```
+
+#### Merkle Proof Verification
+
+```typescript
+// Verify Merkle proof client-side before claiming
+function verifyMerkleProof(
+  leaf: Buffer,
+  proof: Buffer[],
+  root: Buffer
+): boolean {
+  let computedHash = leaf;
+  
+  for (const proofElement of proof) {
+    if (computedHash.compare(proofElement) <= 0) {
+      computedHash = Buffer.from(
+        anchor.utils.sha256.hash(
+          Buffer.concat([computedHash, proofElement])
+        )
+      );
+    } else {
+      computedHash = Buffer.from(
+        anchor.utils.sha256.hash(
+          Buffer.concat([proofElement, computedHash])
+        )
+      );
+    }
+  }
+  
+  return computedHash.equals(root);
+}
+
+// Create leaf hash for verification
+function createLeafHash(index: number, address: PublicKey, amount: BN): Buffer {
+  const indexBuffer = Buffer.alloc(4);
+  indexBuffer.writeUInt32LE(index);
+  
+  const amountBuffer = Buffer.alloc(8);
+  amountBuffer.writeBigUInt64LE(BigInt(amount.toString()));
+  
+  return Buffer.from(
+    anchor.utils.sha256.hash(
+      Buffer.concat([
+        indexBuffer,
+        address.toBuffer(),
+        amountBuffer
+      ])
+    )
+  );
+}
+```
+
+#### Scoring Integration
+
+For off-chain indexers calculating scores:
+
+```typescript
+// Hero scoring formula implementation
+function calculateHeroScore(
+  havg: number,      // Time-weighted average holdings
+  tscore: number,    // Holding duration score
+  padj: number,      // Price adjustment score
+  sadj: number,      // Selling penalty score
+  dwin: number       // Winner history multiplier
+): number {
+  const sPre = (0.40 * havg) + (0.35 * tscore) + (0.25 * padj) - (0.50 * sadj);
+  return sPre > 0 ? sPre * dwin : sPre;
+}
+
+// Winner history multiplier calculation
+function calculateDwin(pastWins: Array<{round: number, rank: number}>): number {
+  let sumDecay = 0;
+  
+  for (const win of pastWins) {
+    if (win.rank === 1) {
+      sumDecay += 0.15;
+    } else if (win.rank >= 2 && win.rank <= 3) {
+      sumDecay += 0.10;
+    } else if (win.rank >= 4 && win.rank <= 10) {
+      sumDecay += 0.05;
+    }
+  }
+  
+  return Math.max(1.0 - sumDecay, 0.40);
+}
+```
+
+#### UI Integration Guidelines
+
+1. **Leaderboard Display:**
+   - Show normalized scores (-1000 to +1000) for UI
+   - Use raw scores for actual ranking and payouts
+   - Display winner history and Dwin multiplier
+
+2. **Claim Interface:**
+   - Verify Merkle proof before submitting transaction
+   - Show claim status and remaining time
+   - Handle claim state verification
+
+3. **Round Management:**
+   - Monitor round start/end times
+   - Track distribution progress and caps
+   - Show publisher activity and root posting
+
+#### Security Recommendations
+
+1. **Merkle Proof Validation:**
+   - Always verify proofs client-side before claiming
+   - Validate leaf construction matches program logic
+   - Check proof array length and structure
+
+2. **Round Cap Monitoring:**
+   - Track claimed amounts vs round cap
+   - Alert when approaching 1B LUX limit
+   - Monitor for unusual claiming patterns
+
+3. **Publisher Verification:**
+   - Verify publisher signatures on roots
+   - Monitor for unauthorized root posting attempts
+   - Track publisher changes and governance actions
+
+4. **Claim Protection:**
+   - Prevent double-claiming attempts
+   - Validate winner addresses and amounts
+   - Implement claim status caching
+
+#### Testing Checklist
+
+Before mainnet integration:
+
+- [ ] Verify program ID and key addresses
+- [ ] Test Merkle proof generation and verification
+- [ ] Validate scoring formula implementation
+- [ ] Test claim functionality with various proofs
+- [ ] Verify round timing and cap enforcement
+- [ ] Test publisher authorization
+- [ ] Validate event monitoring
+- [ ] Test pause/unpause scenarios
+- [ ] Verify winner history tracking

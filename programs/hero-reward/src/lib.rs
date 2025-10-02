@@ -8,12 +8,8 @@ declare_id!("62syzcwvnS56yKHakNx2rr4JBd5BJmgJ7jDMK3SiipbM");
 // Constants
 const TOTAL_ROUNDS: u8 = 45;
 const ROUND_LEN_DAYS: u64 = 60;
-const PER_ROUND_CAP: u64 = 1_000_000_000; // 1B LUX per round
-const TOTAL_TOKENS: u64 = 45_000_000_000; // 45B LUX total
-
-// Constant addresses
-const GOV_ADDRESS: &str = "37aE2MTeWyDLogD4KbBHmLp9A2XWddqfTbAAfWfQYm7U"; // Governance multisig
-const REW_ADDRESS: &str = "5ZdxPKRyZW6y5ADgsNYqfYBkyW5o9kDm9Wg7nrcHmZTm"; // REW multisig for funding
+const PER_ROUND_CAP_HUMAN: u64 = 1_000_000_000; // 1B LUX per round (human readable)
+const TOTAL_TOKENS_HUMAN: u64 = 45_000_000_000; // 45B LUX total (human readable)
 
 #[program]
 pub mod hero_rewards {
@@ -30,9 +26,15 @@ pub mod hero_rewards {
         let mint_info = ctx.accounts.mint_lux.to_account_info();
         let mint_data = Mint::try_deserialize(&mut &mint_info.data.borrow()[..])?;
         
-        // Calculate total units: 45B * 10^decimals
-        let total_units = (TOTAL_TOKENS as u128)
-            .checked_mul(10u128.pow(mint_data.decimals as u32))
+        // Calculate total units: 45B * 10^decimals with proper overflow protection
+        let decimals_power = 10u128.pow(mint_data.decimals as u32);
+        let total_units = (TOTAL_TOKENS_HUMAN as u128)
+            .checked_mul(decimals_power)
+            .ok_or(HeroRewardsError::Overflow)?;
+
+        // Calculate per-round cap: 1B * 10^decimals with proper overflow protection
+        let per_round_cap = (PER_ROUND_CAP_HUMAN as u128)
+            .checked_mul(decimals_power)
             .ok_or(HeroRewardsError::Overflow)?;
 
         state.governance = ctx.accounts.governance.key();
@@ -42,6 +44,7 @@ pub mod hero_rewards {
         state.round_len_secs = round_len_secs;
         state.total_rounds = TOTAL_ROUNDS;
         state.total_units = total_units;
+        state.per_round_cap = per_round_cap;
         state.publisher = ctx.accounts.publisher.key();
         state.paused = false;
 
@@ -248,10 +251,7 @@ pub struct Initialize<'info> {
     )]
     pub state: Account<'info, HeroRewardsState>,
 
-    #[account(
-        mut,
-        constraint = governance.key() == Pubkey::from_str(GOV_ADDRESS).unwrap() @ HeroRewardsError::Unauthorized
-    )]
+    #[account(mut)]
     pub governance: Signer<'info>,
 
     /// CHECK: PDA authority for vault
@@ -460,6 +460,7 @@ pub struct HeroRewardsState {
     pub round_len_secs: i64,
     pub total_rounds: u8,
     pub total_units: u128,
+    pub per_round_cap: u128,       // Per-round cap (1B * 10^decimals)
     pub publisher: Pubkey,
     pub paused: bool,
 }
